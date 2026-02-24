@@ -5,7 +5,8 @@ function val = methane_soundspeed(T, P)
 %
 %   T in Kelvin, P in Pascal. Scalar or array inputs.
 %   Based on CoolProp tabulation for Yamal natural gas mixture:
-%   CH4 96.0%, C2H6 1.5%, C3H8 0.3%, N2 1.5%, CO2 0.7%
+%   CH4 98.0%, C2H6 0.75%, C3H8 0.15%, N2 0.75%, CO2 0.35%
+%   NOTE: Tables below are for old 96% mix — regenerate with generate_tables.py
 
   persistent T_grid P_grid a_table
   if isempty(a_table)

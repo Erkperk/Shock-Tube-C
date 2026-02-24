@@ -1,40 +1,43 @@
 #!/usr/bin/env python3
 """
-Generate all verification plots from a single simulation run:
-  1. Outlet profiles at t≈0.5s (gas speed, Mach, pressure, temperature, mass flow)
+Generate all verification plots from a simulation run:
+  1. Outlet time histories for the first 0.5 s (mass flow, pressure, Mach, etc.)
   2. First 3 bar of pressure drop at the closed end
   3. Full pressure decline at the closed end
+
+Usage:
+  python3 plot_all.py <blowdown_prefix> [--hllc <early_prefix>]
+
+  If --hllc is given, figure 1 uses that HLLC timeseries for accurate early data.
+  Otherwise, figure 1 uses the blowdown timeseries.
 """
 import numpy as np
 import matplotlib.pyplot as plt
-import sys, glob
+import sys
 
-prefix = sys.argv[1] if len(sys.argv) > 1 else 'ns1ag_full'
+# Parse arguments
+prefix = 'ns1ag_full'
+hllc_prefix = None
+args = sys.argv[1:]
+i = 0
+while i < len(args):
+    if args[i] == '--hllc' and i + 1 < len(args):
+        hllc_prefix = args[i + 1]
+        i += 2
+    else:
+        prefix = args[i]
+        i += 1
 
-# Try to find the files with _lf suffix first, then without
-def find_file(base):
+def find_file(base, pfx):
     for suf in ['_lf', '']:
-        fname = f'{base}_{prefix}{suf}.dat'
+        fname = f'{base}_{pfx}{suf}.dat'
         try:
             open(fname)
             return fname
         except FileNotFoundError:
             pass
-    raise FileNotFoundError(f'Cannot find {base}_{prefix}[_lf].dat')
+    raise FileNotFoundError(f'Cannot find {base}_{pfx}[_lf].dat')
 
-ts_file = find_file('timeseries')
-early_file = find_file('early')
-
-print(f'Timeseries: {ts_file}')
-print(f'Early profiles: {early_file}')
-
-# Gas constants
-R = 8314.46 / 16.71  # J/(kg·K)
-GAMMA = 1.27
-dia = 1.153
-area = 0.25 * np.pi * dia**2
-
-# ======== Load timeseries ========
 def load_timeseries(fname):
     lines = open(fname).readlines()
     data = []
@@ -48,132 +51,121 @@ def load_timeseries(fname):
                 continue
     return np.array(data)
 
+# Load blowdown timeseries
+ts_file = find_file('timeseries', prefix)
+print(f'Blowdown timeseries: {ts_file}')
 ts = load_timeseries(ts_file)
+
+# Load early timeseries (HLLC if available, else blowdown)
+if hllc_prefix:
+    hllc_file = find_file('timeseries', hllc_prefix)
+    print(f'HLLC early timeseries: {hllc_file}')
+    ts_early = load_timeseries(hllc_file)
+else:
+    ts_early = ts
+
 t = ts[:, 0]
 mf_kg = ts[:, 1]       # mass flow [kg/s]
-u_out = ts[:, 2]
-rho_out = ts[:, 3]
-p_out = ts[:, 4]
-T_out = ts[:, 5]
-totmass = ts[:, 6]
 p_base = ts[:, 7]      # closed-end pressure [Pa]
-p_mid = ts[:, 8]
-a_out = ts[:, 9]
-mach_out = ts[:, 10]
+mf_ts = mf_kg / 1000   # tonnes/s
 
-print(f'Timeseries: {len(t)} points, t = {t[0]:.1f} to {t[-1]:.1f} s')
+te = ts_early[:, 0]
+mf_e = ts_early[:, 1] / 1000  # tonnes/s
+u_e = ts_early[:, 2]
+rho_e = ts_early[:, 3]
+p_e = ts_early[:, 4]
+T_e = ts_early[:, 5]
+a_e = ts_early[:, 9]
+mach_e = ts_early[:, 10]
+
+print(f'Blowdown: {len(t)} points, t = {t[0]:.4f} to {t[-1]:.1f} s')
+print(f'Early: {len(te)} points, t = {te[0]:.4f} to {te[-1]:.1f} s')
+settled_idx = np.where(te > 0.005)[0]
+if len(settled_idx) > 0:
+    pk_i = settled_idx[mf_e[settled_idx].argmax()]
+    print(f'Peak mass flow (early): {mf_e[pk_i]:.2f} t/s at t = {te[pk_i]:.4f} s')
+else:
+    print(f'Peak mass flow (early): {mf_e.max():.2f} t/s at t = {te[mf_e.argmax()]:.4f} s')
 print(f'p_base: {p_base[0]/1e5:.1f} to {p_base[-1]/1e5:.1f} bar')
 
-# ======== Load early profiles ========
-def load_early_profiles(fname):
-    lines = open(fname).readlines()
-    snapshots = []
-    current = None
-    for line in lines:
-        if line.startswith('# t ='):
-            t_val = float(line.split('=')[1])
-            current = {'t': t_val, 'data': []}
-            snapshots.append(current)
-        elif not line.startswith('#') and line.strip() and current is not None:
-            parts = line.split()
-            if len(parts) >= 5:
-                current['data'].append([float(x) for x in parts[:6]])
-    return snapshots
-
-snaps = load_early_profiles(early_file)
-print(f'Early profiles: {len(snaps)} snapshots')
-for s in snaps:
-    print(f'  t = {s["t"]:.3f} s, {len(s["data"])} cells')
-
-# Find snapshot closest to t=0.5s
-target_t = 0.5
-best = min(snaps, key=lambda s: abs(s['t'] - target_t))
-t_snap = best['t']
-data = np.array(best['data'])
-x = data[:, 0]
-rho_s = data[:, 1]
-u_s = data[:, 2]
-p_s = data[:, 3]
-T_s = data[:, 4]
-
-# Compute derived quantities
-a_s = np.sqrt(GAMMA * p_s / rho_s)
-mach_s = np.where(a_s > 0, u_s / a_s, 0)
-mf_s = rho_s * u_s * area / 1000  # tonnes/s
-
-print(f'\nUsing snapshot at t = {t_snap:.3f} s')
-i_out = -2
-print(f'Outlet: u={u_s[i_out]:.1f} m/s, M={mach_s[i_out]:.3f}, '
-      f'p={p_s[i_out]/1e5:.1f} bar, T={T_s[i_out]:.1f} K, '
-      f'mf={mf_s[i_out]:.2f} t/s')
-
 # ================================================================
-# FIGURE 1: Outlet profiles at t ≈ 0.5 s
+# FIGURE 1: Outlet time histories for the first 0.5 s
 # ================================================================
+mask05 = te <= 0.5
+t05 = te[mask05]
+if len(t05) < 3:
+    print('WARNING: fewer than 3 early points in first 0.5 s')
+    mask05 = te <= 2.0
+    t05 = te[mask05]
+
+solver = 'HLLC' if hllc_prefix else ('LF' if '_lf' in ts_file else 'HLLC')
+
 fig1, axes = plt.subplots(2, 3, figsize=(16, 9))
-fig1.suptitle(f'Outlet profiles at t = {t_snap:.2f} s (last 250 m)', fontsize=14)
+fig1.suptitle(f'Outlet quantities — first {t05[-1]:.2f} s ({solver}, dx=1m)', fontsize=14)
 
-xlim = (-260, 10)
+# Mass flow (hide ghost cell artifact at t < 0.005s)
+ax = axes[0, 0]
+mf_plot = mf_e[mask05].copy()
+mf_plot[t05 < 0.005] = np.nan
+ax.plot(t05, mf_plot, 'b-', linewidth=1.5)
+# Skip first-timestep ghost cell artifact when finding peak
+settled = np.where(te > 0.005)[0]
+peak_i = settled[mf_e[settled].argmax()] if len(settled) > 0 else mf_e.argmax()
+ax.axhline(y=mf_e[peak_i], color='r', linestyle=':', alpha=0.5)
+ax.annotate(f'peak: {mf_e[peak_i]:.1f} t/s @ t={te[peak_i]:.3f}s',
+            xy=(te[peak_i], mf_e[peak_i]), fontsize=9, color='r',
+            xytext=(0.5, 0.85), textcoords='axes fraction',
+            arrowprops=dict(arrowstyle='->', color='r', alpha=0.5))
+ax.set_xlabel('Time [s]')
+ax.set_ylabel('Mass flow [t/s]')
+ax.set_title('Outlet mass flow')
+ax.grid(True, alpha=0.3)
 
 # Gas speed
-ax = axes[0, 0]
-ax.plot(x, u_s, 'b-', linewidth=1.2)
-ax.set_xlabel('x [m]')
+ax = axes[0, 1]
+ax.plot(t05, u_e[mask05], 'b-', linewidth=1.5)
+ax.set_xlabel('Time [s]')
 ax.set_ylabel('Gas velocity [m/s]')
-ax.set_title('Gas speed')
-ax.set_xlim(xlim)
+ax.set_title('Outlet gas speed')
 ax.grid(True, alpha=0.3)
 
 # Mach number
-ax = axes[0, 1]
-ax.plot(x, mach_s, 'b-', linewidth=1.2)
+ax = axes[0, 2]
+ax.plot(t05, mach_e[mask05], 'b-', linewidth=1.5)
 ax.axhline(y=1.0, color='r', linestyle=':', alpha=0.6, label='M = 1')
-ax.set_xlabel('x [m]')
+ax.set_xlabel('Time [s]')
 ax.set_ylabel('Mach number')
-ax.set_title('Mach number')
-ax.set_xlim(xlim)
+ax.set_title('Outlet Mach number')
 ax.legend()
 ax.grid(True, alpha=0.3)
 
 # Pressure
-ax = axes[0, 2]
-ax.plot(x, p_s / 1e5, 'b-', linewidth=1.2)
-ax.set_xlabel('x [m]')
+ax = axes[1, 0]
+ax.plot(t05, p_e[mask05] / 1e5, 'b-', linewidth=1.5)
+ax.set_xlabel('Time [s]')
 ax.set_ylabel('Pressure [bar]')
-ax.set_title('Pressure')
-ax.set_xlim(xlim)
+ax.set_title('Outlet pressure')
 ax.grid(True, alpha=0.3)
 
 # Temperature
-ax = axes[1, 0]
-ax.plot(x, T_s, 'b-', linewidth=1.2)
-ax.set_xlabel('x [m]')
-ax.set_ylabel('Temperature [K]')
-ax.set_title('Temperature')
-ax.set_xlim(xlim)
-ax.grid(True, alpha=0.3)
-
-# Mass flow
 ax = axes[1, 1]
-ax.plot(x, mf_s, 'b-', linewidth=1.2)
-ax.set_xlabel('x [m]')
-ax.set_ylabel('Mass flow [t/s]')
-ax.set_title('Mass flow')
-ax.set_xlim(xlim)
+ax.plot(t05, T_e[mask05], 'b-', linewidth=1.5)
+ax.set_xlabel('Time [s]')
+ax.set_ylabel('Temperature [K]')
+ax.set_title('Outlet temperature')
 ax.grid(True, alpha=0.3)
 
 # Density
 ax = axes[1, 2]
-ax.plot(x, rho_s, 'b-', linewidth=1.2)
-ax.set_xlabel('x [m]')
+ax.plot(t05, rho_e[mask05], 'b-', linewidth=1.5)
+ax.set_xlabel('Time [s]')
 ax.set_ylabel('Density [kg/m³]')
-ax.set_title('Density')
-ax.set_xlim(xlim)
+ax.set_title('Outlet density')
 ax.grid(True, alpha=0.3)
 
 plt.tight_layout()
-fig1.savefig('outlet_profiles.png', dpi=150)
-print('\nSaved: outlet_profiles.png')
+fig1.savefig('outlet_early.png', dpi=150)
+print('\nSaved: outlet_early.png')
 plt.close(fig1)
 
 # ================================================================
@@ -225,7 +217,7 @@ plt.close(fig2)
 # FIGURE 3: Full pressure decline to ~8 bar
 # ================================================================
 fig3, axes3 = plt.subplots(1, 2, figsize=(14, 5))
-fig3.suptitle('Full blowdown: NS1A German (224 km, 165 bar → ambient)', fontsize=13)
+fig3.suptitle('Full blowdown: NS1A German (224 km, 165 bar)', fontsize=13)
 
 # Panel 1: Pressure vs time
 ax = axes3[0]
@@ -237,9 +229,11 @@ ax.axhline(y=8.0, color='r', linestyle='--', alpha=0.4, label='8 bar')
 ax.legend(fontsize=9)
 ax.grid(True, alpha=0.3)
 
-# Panel 2: Mass flow at outlet vs time
+# Panel 2: Mass flow at outlet vs time (skip first-timestep artifact)
 ax = axes3[1]
-ax.plot(t / 3600, mf_kg / 1000, 'b-', linewidth=1)
+mf_clip = mf_ts.copy()
+mf_clip[t < 0.005] = np.nan  # hide ghost cell artifact
+ax.plot(t / 3600, mf_clip, 'b-', linewidth=1)
 ax.set_xlabel('Time [hours]')
 ax.set_ylabel('Mass flow at outlet [t/s]')
 ax.set_title('Outlet mass flow')
