@@ -1,0 +1,26 @@
+# Build output
+shock_tube
+*.o
+
+# Simulation data
+*.dat
+*.mat
+
+# Plots
+*.png
+*.jpg
+
+# Octave/Matlab
+octave-workspace
+
+# macOS
+.DS_Store
+
+# Editor files
+*~
+\#*\#
+
+# Python
+*.pyc
+__pycache__/
+*.npz
