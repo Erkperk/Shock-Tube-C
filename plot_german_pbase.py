@@ -20,7 +20,7 @@ def safe_load(fname):
 configs = [
     ('timeseries_ns1ag_ghost_lf.dat', 'NS1 String A (224 km, 165 bar)', 'b'),
     ('timeseries_ns1bg_ghost_lf.dat', 'NS1 String B (217.7 km, 165 bar)', 'r'),
-    ('timeseries_ns2ag_ghost_lf.dat', 'NS2 String A (153.6 km, 103 bar)', 'g'),
+    ('timeseries_ns2ag_ghost_lf.dat', 'NS2 String A (153.6 km, 104 bar)', 'g'),
 ]
 
 # CoolProp reference sound speeds and predicted wave arrival

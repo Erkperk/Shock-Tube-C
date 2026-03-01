@@ -89,7 +89,7 @@ time    = 0 ;
 if (shocktube)
     
   
-    pressureR   = 7.1 * 100000;       
+    pressureR   = 8.1 * 100000;       
     %pressureR   = 0.1 * 100000;       
     %pressureL   = 103 * 100000; %ns2
     %

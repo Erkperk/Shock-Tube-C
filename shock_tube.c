@@ -63,7 +63,7 @@ static int g_n_profiles = 100;
 static double g_dia         = 1.153;
 static double g_rough       = 0.017e-3;
 static double g_pressure_L  = 165e5;
-static double g_pressure_R  = 7.1e5;
+static double g_pressure_R  = 8.1e5;
 static double g_T0          = 282.0;
 
 /* Derived geometry (computed once after CLI parsing) */
@@ -327,15 +327,16 @@ static void set_outlet_ghost(double *rho_arr, double *u_arr, double *e_arr,
                              double *p_arr, double *T_arr, double *a_arr,
                              double *Cv_arr, int N)
 {
-    /* Tube mode: reflective wall at right end (mirror of N-2, negate velocity) */
+    /* Tube mode: transmissive (outflow) BC at right end of vacuum tube.
+     * Zero-gradient extrapolation allows expansion waves to exit freely. */
     if (g_vacuum_ext > 0.0) {
         rho_arr[N-1] = rho_arr[N-2];
-        u_arr[N-1]   = -u_arr[N-2];
+        u_arr[N-1]   = fmax(u_arr[N-2], 0.0);  /* allow outflow only */
         p_arr[N-1]   = p_arr[N-2];
         T_arr[N-1]   = T_arr[N-2];
         a_arr[N-1]   = a_arr[N-2];
         Cv_arr[N-1]  = Cv_arr[N-2];
-        e_arr[N-1]   = e_arr[N-2];  /* same total energy (KE same due to |u|) */
+        e_arr[N-1]   = e_arr[N-2];
         g_choked_active = 0;
         g_poutlet_choked = 0.0;
         return;
@@ -452,6 +453,9 @@ static void update_wall_and_heat(int N, int i_start, double *e_arr,
 {
     if (g_no_source || g_no_heat) return;
 
+    /* In tube mode, only apply heat transfer to pipe cells (x < 0), not vacuum */
+    int i_heat_end = (g_vacuum_ext > 0.0 && g_i_diaphragm > 0) ? g_i_diaphragm : N - 1;
+
     const double circ_over_area = g_circum / g_area;
 
     /* --- Simplified constant-T_wall model (old model) --- */
@@ -460,7 +464,7 @@ static void update_wall_and_heat(int N, int i_start, double *e_arr,
          * Total thermal resistance: steel/k_steel + concrete/k_conc [m²·K/W] */
         const double R_wall = T_STEEL_WALL / K_STEEL + T_CONC_WALL / K_CONC;
         const double U_wall = (1.0 / R_wall) * circ_over_area;  /* W/(m³·K) */
-        for (int i = i_start; i < N - 1; i++) {
+        for (int i = i_start; i < i_heat_end; i++) {
             double tdiff = g_T0 - T_gas[i];
             double tau = U_wall / (rho_arr[i] * Cv_arr[i]);
             double deltaT = tdiff * (1.0 - exp(-dt * tau));
@@ -481,7 +485,7 @@ static void update_wall_and_heat(int N, int i_start, double *e_arr,
     const double DB_coeff = 0.023 * pow(PR_GAS, 0.4) * K_GAS_CONV / g_dia;
     const double half_dr_over_k = 0.5 * dr_s / K_STEEL;  /* conductive resistance */
 
-    for (int i = i_start; i < N - 1; i++) {
+    for (int i = i_start; i < i_heat_end; i++) {
         double Tg = T_gas[i];
 
         /* --- Flow-dependent convective HTC (Dittus-Boelter) --- */
@@ -713,9 +717,10 @@ static void compute_hllc_flux(
         e_out[i] = e_in[i] + dt / dx[i] * (e_flux[i-1] - e_flux[i]);
     }
 
-    /* Friction source term (implicit) */
+    /* Friction source term (implicit) — skip vacuum cells (no pipe friction there) */
     if (!g_no_source) {
-        for (int i = i_start; i < N - 1; i++) {
+        int i_fric_end = (g_vacuum_ext > 0.0 && g_i_diaphragm > 0) ? g_i_diaphragm : N - 1;
+        for (int i = i_start; i < i_fric_end; i++) {
             double denom_f = 1.0 + sqrt(1.0 + 2.0 * dt * fabs(u_out[i]) * lambda_fric / g_dia);
             u_out[i] = 2.0 * u_out[i] / denom_f;
         }
@@ -799,9 +804,10 @@ static void compute_lf_step(
         e_out[i] = e_in[i] + dt / dx[i] * (e_flux[i-1] - e_flux[i]);
     }
 
-    /* Friction source term (implicit) */
+    /* Friction source term (implicit) — skip vacuum cells */
     if (!g_no_source) {
-        for (int i = i_start; i < N - 1; i++) {
+        int i_fric_end = (g_vacuum_ext > 0.0 && g_i_diaphragm > 0) ? g_i_diaphragm : N - 1;
+        for (int i = i_start; i < i_fric_end; i++) {
             double denom_f = 1.0 + sqrt(1.0 + 2.0 * dt * fabs(u_out[i]) * lambda_fric / g_dia);
             u_out[i] = 2.0 * u_out[i] / denom_f;
         }
@@ -1094,16 +1100,16 @@ static void print_usage(const char *prog)
     "  --ideal             Ideal gas mode (Z=1, bypass thermodynamic tables)\n"
     "\n"
     "Pipeline presets (set geometry, pressure, friction, grid, endtime):\n"
-    "  --ns1ag             NS1 string A, German end  (Lubmin,    224 km, 164 bar)\n"
-    "  --ns1ar             NS1 string A, Russian end (Portovaya, 999.8 km, 164 bar)\n"
-    "  --ns1bg             NS1 string B, German end  (Lubmin,    217.7 km, 164 bar)\n"
-    "  --ns1br             NS1 string B, Russian end (Portovaya, 1006.2 km, 164 bar)\n"
-    "  --ns2ag             NS2 string A, German end  (Lubmin,    153.6 km, 103 bar)\n"
-    "  --ns2ar             NS2 string A, Russian end (Portovaya, 1076.4 km, 103 bar)\n"
+    "  --ns1ag             NS1 string A, German end  (Lubmin,    224 km, 165 bar)\n"
+    "  --ns1ar             NS1 string A, Russian end (Portovaya, 999.8 km, 165 bar)\n"
+    "  --ns1bg             NS1 string B, German end  (Lubmin,    217.7 km, 165 bar)\n"
+    "  --ns1br             NS1 string B, Russian end (Portovaya, 1006.2 km, 165 bar)\n"
+    "  --ns2ag             NS2 string A, German end  (Lubmin,    153.6 km, 104 bar)\n"
+    "  --ns2ar             NS2 string A, Russian end (Portovaya, 1076.4 km, 104 bar)\n"
     "\n"
     "Physical parameters:\n"
     "  --pL <Pa>           Initial pipe pressure                [165e5]\n"
-    "  --pR <Pa>           Ambient / outlet back-pressure       [7.1e5]\n"
+    "  --pR <Pa>           Ambient / outlet back-pressure       [8.1e5]\n"
     "  --T0 <K>            Initial gas & seawater temperature   [282]\n"
     "  --dia <m>           Pipe inner diameter                  [1.153]\n"
     "  --rough <m>         Wall roughness (Colebrook)           [1.7e-5]\n"
@@ -1174,42 +1180,42 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--merge") == 0) g_merge = 1;
         else if (strcmp(argv[i], "--ns1ag") == 0) {
             /* NS1 string A, German end (Lubmin): 224 km */
-            g_pipe_length = 224000.0;  g_pressure_L = 164e5; g_pressure_R = 7.61e5;
+            g_pipe_length = 224000.0;  g_pressure_L = 165e5; g_pressure_R = 8.61e5;
             g_end_time = 50000.0; g_dx_init = 1.0; g_dx_max = 20.0;
             g_dx_trans = 1000.0; g_merge = 1; g_lambda_override = 0.007;
             if (!prefix) prefix = "ns1ag";
         }
         else if (strcmp(argv[i], "--ns1ar") == 0) {
             /* NS1 string A, Russian end (Portovaya): 999.8 km */
-            g_pipe_length = 999800.0;  g_pressure_L = 164e5; g_pressure_R = 7.61e5;
+            g_pipe_length = 999800.0;  g_pressure_L = 165e5; g_pressure_R = 8.61e5;
             g_end_time = 450000.0; g_dx_init = 1.0; g_dx_max = 200.0;
             g_dx_trans = 1000.0; g_merge = 1; g_lambda_override = 0.007;
             if (!prefix) prefix = "ns1ar";
         }
         else if (strcmp(argv[i], "--ns1bg") == 0) {
             /* NS1 string B, German end (Lubmin): 217.7 km */
-            g_pipe_length = 217700.0;  g_pressure_L = 164e5; g_pressure_R = 7.23e5;
+            g_pipe_length = 217700.0;  g_pressure_L = 165e5; g_pressure_R = 8.23e5;
             g_end_time = 50000.0; g_dx_init = 1.0; g_dx_max = 20.0;
             g_dx_trans = 1000.0; g_merge = 1; g_lambda_override = 0.007;
             if (!prefix) prefix = "ns1bg";
         }
         else if (strcmp(argv[i], "--ns1br") == 0) {
             /* NS1 string B, Russian end (Portovaya): 1006.2 km */
-            g_pipe_length = 1006200.0;  g_pressure_L = 164e5; g_pressure_R = 7.23e5;
+            g_pipe_length = 1006200.0;  g_pressure_L = 165e5; g_pressure_R = 8.23e5;
             g_end_time = 450000.0; g_dx_init = 1.0; g_dx_max = 200.0;
             g_dx_trans = 1000.0; g_merge = 1; g_lambda_override = 0.007;
             if (!prefix) prefix = "ns1br";
         }
         else if (strcmp(argv[i], "--ns2ag") == 0) {
             /* NS2 string A, German end (Lubmin): 153.6 km */
-            g_pipe_length = 153600.0;  g_pressure_L = 103e5; g_pressure_R = 7.1e5;
+            g_pipe_length = 153600.0;  g_pressure_L = 104e5; g_pressure_R = 8.1e5;
             g_end_time = 50000.0; g_dx_init = 1.0; g_dx_max = 20.0;
             g_dx_trans = 1000.0; g_merge = 1;
             if (!prefix) prefix = "ns2ag";
         }
         else if (strcmp(argv[i], "--ns2ar") == 0) {
             /* NS2 string A, Russian end (Portovaya): 1076.4 km */
-            g_pipe_length = 1076400.0;  g_pressure_L = 103e5; g_pressure_R = 7.1e5;
+            g_pipe_length = 1076400.0;  g_pressure_L = 104e5; g_pressure_R = 8.1e5;
             g_end_time = 450000.0; g_dx_init = 1.0; g_dx_max = 200.0;
             g_dx_trans = 1000.0; g_merge = 1;
             if (!prefix) prefix = "ns2ar";
@@ -1260,7 +1266,8 @@ int main(int argc, char **argv)
             g_vacuum_ext = atof(argv[++i]);
         else if (strcmp(argv[i], "--tube-start") == 0 && i+1 < argc) {
             g_tube_start = atof(argv[++i]);
-            if (g_vacuum_ext <= 0.0) g_vacuum_ext = 2000.0; /* default 2km vacuum */
+            /* No vacuum extension: outlet ghost cell BC (choked/subsonic NRBC) from t=0.
+             * Use --tube X explicitly if vacuum Riemann problem is desired. */
         }
     }
     g_no_source = no_source;
@@ -1455,14 +1462,19 @@ int main(int argc, char **argv)
     double densityL = g_pressure_L / (g_T0 * RGAS * cfacL);
 
     if (g_vacuum_ext > 0.0) {
-        /* Tube mode: left side at pL, right side at pR */
+        /* Tube mode: left side at pL, right side near-vacuum.
+         * Use p=100 Pa (not pR) — true vacuum Riemann problem.
+         * Ratio pL/p_vac ~ 164000:1 gives full expansion fan. */
+        const double p_vac = 100.0;  /* Pa — near vacuum */
+        double cfac_vac = compression_factor(g_T0, p_vac);
+        double rho_vac  = p_vac / (g_T0 * RGAS * cfac_vac);
         for (int i = 0; i < N; i++) {
             if (xc[i] < 0.0) {
                 rho[i] = densityL;
                 p[i]   = g_pressure_L;
             } else {
-                rho[i] = densityR;
-                p[i]   = g_pressure_R;
+                rho[i] = rho_vac;
+                p[i]   = p_vac;
             }
             u[i] = 0.0;
             T_arr[i] = g_T0;

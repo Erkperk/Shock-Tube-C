@@ -53,7 +53,7 @@ ns1d = 217.7 * 1000;
 ns1s = 224 * 1000;
 pipe_length = 4400;
 
-pressureR   = 7.1 * 100000;  %water pressure
+pressureR   = 8.1 * 100000;  %water pressure (absolute)
 pressureL   = 165 * 100000; %ns1 pressure, ns2 was 103, ns1 was 165
 T0 = 282;  %initial temperature of gas inside pipeline
    

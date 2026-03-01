@@ -64,7 +64,7 @@ T_L = 282.0  # K
 rho_L = p_L / (R * T_L)  # ideal gas
 a_L = np.sqrt(gamma * R * T_L)
 
-p_R = 7.61e5
+p_R = 8.61e5
 rho_R = p_R / (R * T_L)
 
 print(f"rho_L = {rho_L:.2f} kg/m³")

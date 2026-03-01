@@ -138,12 +138,12 @@ dt = CFL * min_i(dx_i / (|u_i| + a_i))
 
 | Preset    | Pipeline     | End     | Length    | Pressure | Endtime   |
 |-----------|--------------|---------|-----------|----------|-----------|
-| `--ns1ag` | NS1 string A | German  | 224 km    | 164 bar  | 50,000 s  |
-| `--ns1ar` | NS1 string A | Russian | 999.8 km  | 164 bar  | 450,000 s |
-| `--ns1bg` | NS1 string B | German  | 217.7 km  | 164 bar  | 50,000 s  |
-| `--ns1br` | NS1 string B | Russian | 1006.2 km | 164 bar  | 450,000 s |
-| `--ns2ag` | NS2 string A | German  | 153.6 km  | 103 bar  | 50,000 s  |
-| `--ns2ar` | NS2 string A | Russian | 1076.4 km | 103 bar  | 450,000 s |
+| `--ns1ag` | NS1 string A | German  | 224 km    | 165 bar  | 50,000 s  |
+| `--ns1ar` | NS1 string A | Russian | 999.8 km  | 165 bar  | 450,000 s |
+| `--ns1bg` | NS1 string B | German  | 217.7 km  | 165 bar  | 50,000 s  |
+| `--ns1br` | NS1 string B | Russian | 1006.2 km | 165 bar  | 450,000 s |
+| `--ns2ag` | NS2 string A | German  | 153.6 km  | 104 bar  | 50,000 s  |
+| `--ns2ar` | NS2 string A | Russian | 1076.4 km | 104 bar  | 450,000 s |
 
 All presets enable adaptive merging and use a linear transition grid. NS1 presets use a calibrated Darcy friction factor of lambda = 0.007.
 
@@ -156,7 +156,7 @@ The Darcy friction factor for NS1 (lambda = 0.007) was calibrated against publis
 | Midnight Sep 28 | 82 bar   | 82.2 bar          |
 | Midnight Sep 29 | 45 bar   | 44.9 bar          |
 
-The initial pressure of 164 bar was also determined from the measurement data. Full blowdown to atmospheric back-pressure (8 bar) takes approximately 123 hours (5.1 days) in the simulation.
+The initial pressure of 165 bar (absolute) was also determined from the measurement data. Full blowdown to seabed back-pressure (~8.6 bar) takes approximately 123 hours (5.1 days) in the simulation.
 
 ## Output Format
 
