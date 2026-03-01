@@ -1210,14 +1210,14 @@ int main(int argc, char **argv)
             /* NS2 string A, German end (Lubmin): 153.6 km */
             g_pipe_length = 153600.0;  g_pressure_L = 104e5; g_pressure_R = 8.1e5;
             g_end_time = 50000.0; g_dx_init = 1.0; g_dx_max = 20.0;
-            g_dx_trans = 1000.0; g_merge = 1;
+            g_dx_trans = 1000.0; g_merge = 1; g_lambda_override = 0.007;
             if (!prefix) prefix = "ns2ag";
         }
         else if (strcmp(argv[i], "--ns2ar") == 0) {
             /* NS2 string A, Russian end (Portovaya): 1076.4 km */
             g_pipe_length = 1076400.0;  g_pressure_L = 104e5; g_pressure_R = 8.1e5;
             g_end_time = 450000.0; g_dx_init = 1.0; g_dx_max = 200.0;
-            g_dx_trans = 1000.0; g_merge = 1;
+            g_dx_trans = 1000.0; g_merge = 1; g_lambda_override = 0.007;
             if (!prefix) prefix = "ns2ar";
         }
         else if (strcmp(argv[i], "--length") == 0 && i+1 < argc)
