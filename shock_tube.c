@@ -120,6 +120,12 @@ static double g_vacuum_ext = 0.0;
 static int    g_i_diaphragm = -1;  /* cell index nearest x=0 */
 static double g_tube_start  = 0.0; /* >0: tube mode for this many seconds, then switch to outlet BC */
 
+/* Probe points: distances upstream from outlet [m].  Indices resolved after grid setup. */
+#define MAX_PROBES 8
+static double g_probe_dist[MAX_PROBES];  /* upstream distances */
+static int    g_probe_idx[MAX_PROBES];   /* cell indices (resolved at runtime) */
+static int    g_n_probes = 0;
+
 /* CoolProp internal energy offset: U_coolprop(T) ≈ CV*T + g_U_offset at low P.
    Computed at startup for ideal-gas fallback when T is outside table range. */
 static double g_U_offset = 0.0;
@@ -1141,6 +1147,9 @@ static void print_usage(const char *prog)
     "  --early-end <s>     Detailed early output phase end      [disabled]\n"
     "  --early-dt <s>      Early phase profile interval         [0.01]\n"
     "\n"
+    "Probe points (add u/p/T columns to timeseries, repeatable):\n"
+    "  --probe <m>         Distance upstream from outlet to monitor\n"
+    "\n"
     "Tube mode (shock tube with vacuum extension):\n"
     "  --tube <m>          Vacuum extension length\n"
     "  --tube-start <s>    Use tube mode for this duration, then switch to outlet BC\n"
@@ -1268,6 +1277,12 @@ int main(int argc, char **argv)
             g_tube_start = atof(argv[++i]);
             /* No vacuum extension: outlet ghost cell BC (choked/subsonic NRBC) from t=0.
              * Use --tube X explicitly if vacuum Riemann problem is desired. */
+        }
+        else if (strcmp(argv[i], "--probe") == 0 && i+1 < argc) {
+            if (g_n_probes < MAX_PROBES)
+                g_probe_dist[g_n_probes++] = atof(argv[++i]);
+            else
+                ++i;  /* skip value, max probes reached */
         }
     }
     g_no_source = no_source;
@@ -1455,6 +1470,19 @@ int main(int argc, char **argv)
     }
     fflush(stdout);
 
+    /* Resolve probe cell indices: find nearest cell to each upstream distance */
+    for (int ip = 0; ip < g_n_probes; ip++) {
+        double x_target = -g_probe_dist[ip];  /* negative = upstream from outlet */
+        double best_dist = 1e30;
+        g_probe_idx[ip] = N - 2;  /* fallback to outlet */
+        for (int i = 0; i < N - 1; i++) {
+            double d = fabs(xc[i] - x_target);
+            if (d < best_dist) { best_dist = d; g_probe_idx[ip] = i; }
+        }
+        printf("Probe %d: %.1f m upstream -> cell %d (x=%.2f m, dx=%.2f m)\n",
+               ip, g_probe_dist[ip], g_probe_idx[ip], xc[g_probe_idx[ip]], dx[g_probe_idx[ip]]);
+    }
+
     /* ===== Initial conditions ===== */
     double cfacR = compression_factor(g_T0, g_pressure_R);
     double cfacL = compression_factor(g_T0, g_pressure_L);
@@ -1549,8 +1577,12 @@ int main(int argc, char **argv)
     fflush(stdout);
     if (g_vacuum_ext > 0.0)
         fprintf(fp_ts, "# t massflow[kg/s] u_diaph rho_diaph p_diaph T_diaph totmass p_base p_mid a_diaph Mach_diaph poutlet_choked choked_active\n");
-    else
-        fprintf(fp_ts, "# t massflow[kg/s] u_out rho_out p_out T_out totmass p_base p_mid a_out Mach_out poutlet_choked choked_active\n");
+    else {
+        fprintf(fp_ts, "# t massflow[kg/s] u_out rho_out p_out T_out totmass p_base p_mid a_out Mach_out poutlet_choked choked_active");
+        for (int ip = 0; ip < g_n_probes; ip++)
+            fprintf(fp_ts, " u_probe%d p_probe%d T_probe%d", ip, ip, ip);
+        fprintf(fp_ts, "\n");
+    }
 
     /* ===== Time integration ===== */
     double sim_time = 0.0;
@@ -1756,9 +1788,14 @@ int main(int argc, char **argv)
             int i_mid = N / 2;
             double a_out = a_arr[ir];
             double mach_out = (a_out > 0.0) ? u[ir] / a_out : 0.0;
-            fprintf(fp_ts, "%.8e %.8e %.8e %.8e %.8e %.8e %.8e %.8e %.8e %.8e %.8e %.8e %d\n",
+            fprintf(fp_ts, "%.8e %.8e %.8e %.8e %.8e %.8e %.8e %.8e %.8e %.8e %.8e %.8e %d",
                     sim_time, mf, u[ir], rho[ir], p[ir], T_arr[ir], totmass, p[0], p[i_mid], a_out, mach_out,
                     g_poutlet_choked, g_choked_active);
+            for (int ip = 0; ip < g_n_probes; ip++) {
+                int pi = g_probe_idx[ip];
+                fprintf(fp_ts, " %.8e %.8e %.8e", u[pi], p[pi], T_arr[pi]);
+            }
+            fprintf(fp_ts, "\n");
         }
 
         if (sim_time >= next_profiles) {
