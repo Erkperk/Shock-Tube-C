@@ -121,7 +121,7 @@ static int    g_i_diaphragm = -1;  /* cell index nearest x=0 */
 static double g_tube_start  = 0.0; /* >0: tube mode for this many seconds, then switch to outlet BC */
 
 /* Probe points: distances upstream from outlet [m].  Indices resolved after grid setup. */
-#define MAX_PROBES 8
+#define MAX_PROBES 24
 static double g_probe_dist[MAX_PROBES];  /* upstream distances */
 static int    g_probe_idx[MAX_PROBES];   /* cell indices (resolved at runtime) */
 static int    g_n_probes = 0;
@@ -921,6 +921,20 @@ static void update_active_front(int N)
     g_i_front = (found > 10) ? found - 10 : 0;
 }
 
+/* ========== Re-resolve probe indices after grid changes ========== */
+static void resolve_probes(int N)
+{
+    for (int ip = 0; ip < g_n_probes; ip++) {
+        double x_target = -g_probe_dist[ip];
+        double best_dist = 1e30;
+        g_probe_idx[ip] = N - 2;
+        for (int i = 0; i < N - 1; i++) {
+            double d = fabs(xc[i] - x_target);
+            if (d < best_dist) { best_dist = d; g_probe_idx[ip] = i; }
+        }
+    }
+}
+
 /* ========== Adaptive cell merging ========== */
 
 static int merge_cells(int *pN, double merge_tol, double merge_dx_max)
@@ -1187,6 +1201,7 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--ideal") == 0) ideal_gas = 1;
         else if (strcmp(argv[i], "--nochoke") == 0) g_no_choke = 1;
         else if (strcmp(argv[i], "--merge") == 0) g_merge = 1;
+        else if (strcmp(argv[i], "--no-merge") == 0) g_merge = 0;
         else if (strcmp(argv[i], "--ns1ag") == 0) {
             /* NS1 string A, German end (Lubmin): 224 km */
             g_pipe_length = 224000.0;  g_pressure_L = 165e5; g_pressure_R = 8.61e5;
@@ -1471,17 +1486,10 @@ int main(int argc, char **argv)
     fflush(stdout);
 
     /* Resolve probe cell indices: find nearest cell to each upstream distance */
-    for (int ip = 0; ip < g_n_probes; ip++) {
-        double x_target = -g_probe_dist[ip];  /* negative = upstream from outlet */
-        double best_dist = 1e30;
-        g_probe_idx[ip] = N - 2;  /* fallback to outlet */
-        for (int i = 0; i < N - 1; i++) {
-            double d = fabs(xc[i] - x_target);
-            if (d < best_dist) { best_dist = d; g_probe_idx[ip] = i; }
-        }
+    resolve_probes(N);
+    for (int ip = 0; ip < g_n_probes; ip++)
         printf("Probe %d: %.1f m upstream -> cell %d (x=%.2f m, dx=%.2f m)\n",
                ip, g_probe_dist[ip], g_probe_idx[ip], xc[g_probe_idx[ip]], dx[g_probe_idx[ip]]);
-    }
 
     /* ===== Initial conditions ===== */
     double cfacR = compression_factor(g_T0, g_pressure_R);
@@ -1658,6 +1666,7 @@ int main(int argc, char **argv)
 
             /* Immediately coarsen fine outlet cells to speed up blowdown */
             N = coarsen_outlet_zone(N);
+            if (g_n_probes > 0) resolve_probes(N);
         }
 
         if (use_lf) {
@@ -1746,6 +1755,9 @@ int main(int argc, char **argv)
             for (int i = 0; i < N; i++) mass_before += rho[i] * dx[i];
 
             int merged = merge_cells(&N, g_merge_tol, g_merge_dx_max);
+
+            if (merged > 0 && g_n_probes > 0)
+                resolve_probes(N);
 
             if (merged > 0) {
                 double mass_after = 0.0;
@@ -1842,6 +1854,7 @@ int main(int argc, char **argv)
             fclose(fp_early);
             fp_early = NULL;  /* prevents re-entry */
             N = coarsen_outlet_zone(N);
+            if (g_n_probes > 0) resolve_probes(N);
         }
 
         /* Stop when closed-end pressure drops below threshold */
